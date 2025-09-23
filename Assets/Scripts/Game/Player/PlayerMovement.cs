@@ -1,3 +1,5 @@
+using System;
+using System.Collections;
 using UnityEngine;
 using UnityEngine.InputSystem;
 
@@ -11,17 +13,32 @@ public class PlayerMovement : MonoBehaviour
 
     [SerializeField] private bool isGrounded;
     [SerializeField] private bool jumpHeld;
+
+    [SerializeField] private bool canDash = true;
+    [SerializeField] private bool isDashing;
+
+    [SerializeField] private bool isFacingRight;
+
     private float coyoteTimeCounter;
     private float jumpBufferCounter;
 
     [SerializeField] private float speed = 9f;
     [SerializeField] private float acceleration = 4f;
     [SerializeField] private float jumpForce = 7f;
+
+    [SerializeField] private float dashingPower = 24f;
+    [SerializeField] private float dashingTime = 0.2f;
+    //[SerializeField] private float dashingCooldown = 1f;
+    private Vector2 dashDirection;
+
     [SerializeField] private float fallMultiplier = 2.5f;
     [SerializeField] private float lowJumpMultiplier = 2f;
+
     [SerializeField] private float airControlMultiplier = 0.5f;
+
     [SerializeField] private float coyoteTime = 0.1f;
     [SerializeField] private float jumpBufferTime = 0.1f;
+
     [SerializeField] private Vector2 groundCheckSize = new Vector2(0.8f, 0.2f);
     [SerializeField] private Transform groundCheck;
     [SerializeField] private LayerMask groundLayer;
@@ -37,12 +54,16 @@ public class PlayerMovement : MonoBehaviour
 
         inputActions.Player.Move.performed += OnMove;
         inputActions.Player.Move.canceled += OnMove;
-        inputActions.Player.Jump.performed += OnJump;
+
+        inputActions.Player.Jump.started += OnJumpStart;
+        inputActions.Player.Jump.canceled += OnJumpCancel;
+
+        inputActions.Player.Dash.started += OnDash;
     }    
 
     void Update()
     {
-
+        if (isGrounded && !isDashing) canDash = true;
         // Update animations
         //animator.SetFloat("Speed", Mathf.Abs(rb.linearVelocity.x));
         //animator.SetBool("isGrounded", isGrounded);
@@ -61,7 +82,7 @@ public class PlayerMovement : MonoBehaviour
         // Realistic jump
         if (rb.linearVelocity.y < 0)
             rb.linearVelocity += Vector2.up * Physics2D.gravity.y * (fallMultiplier - 1) * Time.fixedDeltaTime;
-        else if (rb.linearVelocity.y > 0 && !inputActions.Player.Jump.IsPressed())
+        else if (rb.linearVelocity.y > 0 && !jumpHeld)
             rb.linearVelocity += Vector2.up * Physics2D.gravity.y * (lowJumpMultiplier - 1) * Time.fixedDeltaTime;
 
         // Coyote time
@@ -69,8 +90,7 @@ public class PlayerMovement : MonoBehaviour
         else coyoteTimeCounter -= Time.fixedDeltaTime;
 
         // Jump Buffer
-        if (inputActions.Player.Jump.IsPressed()) jumpBufferCounter = jumpBufferTime;
-        else jumpBufferCounter -= Time.fixedDeltaTime;
+        if (jumpBufferCounter > 0) jumpBufferCounter -= Time.fixedDeltaTime;
 
         // Jump
         if (jumpBufferCounter > 0 && coyoteTimeCounter > 0)
@@ -78,6 +98,10 @@ public class PlayerMovement : MonoBehaviour
             rb.linearVelocity = new Vector2(rb.linearVelocity.x, jumpForce);
             jumpBufferCounter = 0;
         }
+
+        // Regard du personnage 
+        if (moveInput.x > 0.1f) isFacingRight = true;
+        else if (moveInput.x < -0.1f) isFacingRight = false;
     }
 
     void OnMove(InputAction.CallbackContext context)
@@ -85,25 +109,54 @@ public class PlayerMovement : MonoBehaviour
         moveInput = context.ReadValue<Vector2>();
     }
 
-    void OnJump(InputAction.CallbackContext context)
+    void OnJumpStart(InputAction.CallbackContext context)
     {
-        Debug.Log("Debug 1");
-        if (context.performed)
+        jumpBufferCounter = jumpBufferTime;
+        jumpHeld = true;
+    }
+
+    void OnJumpCancel(InputAction.CallbackContext context)
+    {
+        jumpHeld = false;
+    }
+
+    void OnDash(InputAction.CallbackContext context)
+    {
+        if (context.started && canDash)
         {
-            Debug.Log("Debug 2");
-            if (!jumpHeld)
+            StartCoroutine(Dash(moveInput));
+        }
+    }
+
+
+    public IEnumerator Dash(Vector2 inputDirection)
+    {
+        if (canDash)
+        {
+            if (inputDirection.sqrMagnitude < 0.1f) // Pas d'input
             {
-                jumpBufferCounter = jumpBufferTime;
-                jumpHeld = true;
-                Debug.Log("Debug 3");
+                // Dash vers la direction du joueur (droite ou gauche)
+                float facingDir = isFacingRight ? 1f : -1f;
+                dashDirection = new Vector2(facingDir, 0f);
             }
+            else dashDirection = inputDirection.normalized;
+
+            // Lancement du dash
+            canDash = false;
+            isDashing = true;
+
+            float originalGravity = rb.gravityScale;
+            if (dashDirection.y > 0f) rb.gravityScale = 2f;
+            else rb.gravityScale = 0f;
+
+            rb.linearVelocity = dashDirection * dashingPower;
+
+            yield return new WaitForSeconds(dashingTime);
+
+            // Fin du dash
+            rb.gravityScale = originalGravity;
+            isDashing = false;
         }
-        else if (context.canceled)
-        {
-            Debug.Log("Debug 4");
-            jumpHeld = false;
-        }
-        Debug.Log("Debug 5");
     }
 
     void OnDrawGizmosSelected()
@@ -117,6 +170,6 @@ public class PlayerMovement : MonoBehaviour
 }
 /*
  * Bugs :
- * - Si je garde le boutton appuyer je saute dès que je retouche le sol
+ * - Si je laisse le boutton de saut appuyer le dash va plus loin
  * -  
 */
